@@ -19,28 +19,41 @@ type RequestOptions = {
   token?: string
 }
 
-async function requestJson<T>(path: string, options: RequestOptions = {}, init: RequestInit = {}): Promise<T> {
-  if (!API_URL) throw new ApiError('Media backend is not configured. Set VITE_API_URL to connect it.')
+async function requestJson<T>(
+  path: string,
+  options: RequestOptions = {},
+  init: RequestInit = {},
+): Promise<T> {
+  if (!API_URL)
+    throw new ApiError('Media backend is not configured. Set VITE_API_URL to connect it.')
   const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS)
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? REQUEST_TIMEOUT_MS,
+  )
   const abortExternal = () => controller.abort()
   options.signal?.addEventListener('abort', abortExternal, { once: true })
   try {
     const headers = new Headers(init.headers)
     headers.set('Accept', 'application/json')
     if (options.token) headers.set('Authorization', `Bearer ${options.token}`)
-    const response = await fetch(`${API_URL}${path}`, { ...init, headers, signal: controller.signal })
+    const response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    })
     if (!response.ok) {
       throw new ApiError(`Media backend returned ${response.status}.`, response.status)
     }
     try {
-      return await response.json() as T
+      return (await response.json()) as T
     } catch {
       throw new ApiError('Media backend returned an invalid response.')
     }
   } catch (error) {
     if (error instanceof ApiError) throw error
-    if (error instanceof DOMException && error.name === 'AbortError') throw new ApiError('Media backend request timed out.')
+    if (error instanceof DOMException && error.name === 'AbortError')
+      throw new ApiError('Media backend request timed out.')
     throw new ApiError('Unable to reach the media backend.')
   } finally {
     window.clearTimeout(timeout)
@@ -54,15 +67,25 @@ function normalizeMedia(item: ApiMedia, index: number): MediaItem {
   return { ...item, id: item.id ?? `media-${index}`, genres: item.genres ?? [], source: 'api' }
 }
 
-export async function fetchMedia(options: { type?: MediaType; signal?: AbortSignal } = {}): Promise<MediaItem[]> {
+export async function fetchMedia(
+  options: { type?: MediaType; signal?: AbortSignal } = {},
+): Promise<MediaItem[]> {
   const query = options.type ? `?type=${encodeURIComponent(options.type)}` : ''
-  const result = await requestJson<ApiMedia[] | { items: ApiMedia[] }>(`/api/media${query}`, { signal: options.signal })
+  const result = await requestJson<ApiMedia[] | { items: ApiMedia[] }>(`/api/media${query}`, {
+    signal: options.signal,
+  })
   const items = Array.isArray(result) ? result : result.items
   return items.map(normalizeMedia)
 }
 
-export async function lookupPreviewImage(title: string, signal?: AbortSignal): Promise<{ url: string | null }> {
-  return requestJson<{ url: string | null }>(`/api/media/preview?title=${encodeURIComponent(title)}`, { signal })
+export async function lookupPreviewImage(
+  title: string,
+  signal?: AbortSignal,
+): Promise<{ url: string | null }> {
+  return requestJson<{ url: string | null }>(
+    `/api/media/preview?title=${encodeURIComponent(title)}`,
+    { signal },
+  )
 }
 
 export async function checkHealth(signal?: AbortSignal): Promise<{ ok: boolean }> {
@@ -81,7 +104,11 @@ export type CreateMediaInput = {
   file?: File
 }
 
-export async function createMedia(input: CreateMediaInput, token: string, signal?: AbortSignal): Promise<MediaItem> {
+export async function createMedia(
+  input: CreateMediaInput,
+  token: string,
+  signal?: AbortSignal,
+): Promise<MediaItem> {
   if (!token.trim()) throw new ApiError('An admin token is required.')
   const formData = new FormData()
   formData.append('title', input.title.trim())
@@ -93,6 +120,10 @@ export async function createMedia(input: CreateMediaInput, token: string, signal
   formData.append('previewUrl', input.previewUrl.trim())
   formData.append('subtitleUrl', input.subtitleUrl.trim())
   if (input.file) formData.append('file', input.file, input.file.name)
-  const result = await requestJson<ApiMedia>('/api/admin/media', { token, signal }, { method: 'POST', body: formData })
+  const result = await requestJson<ApiMedia>(
+    '/api/admin/media',
+    { token, signal },
+    { method: 'POST', body: formData },
+  )
   return normalizeMedia(result, 0)
 }

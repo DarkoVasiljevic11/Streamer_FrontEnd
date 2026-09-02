@@ -18,7 +18,10 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [apiError, setApiError] = useState<string | null>(null)
   const [isDemo, setIsDemo] = useState(false)
-  const [lists, setLists] = useState<Record<string, string[]>>({ 'Watch later': ['Past Lives'], 'Weekend picks': [] })
+  const [lists, setLists] = useState<Record<string, string[]>>({
+    'Watch later': ['Past Lives'],
+    'Weekend picks': [],
+  })
   const [listPicker, setListPicker] = useState<string | null>(null)
   const [selected, setSelected] = useState<MediaItem | null>(null)
   const [createListModal, setCreateListModal] = useState(false)
@@ -59,15 +62,24 @@ function App() {
     return () => document.removeEventListener('pointerdown', closePicker)
   }, [])
 
-  const continueWatching = useMemo(() => media.filter((item) => item.progress !== undefined), [media])
+  const continueWatching = useMemo(
+    () => media.filter((item) => item.progress !== undefined),
+    [media],
+  )
   const films = useMemo(() => media.filter((item) => item.type === 'movie'), [media])
   const series = useMemo(() => media.filter((item) => item.type === 'series'), [media])
   const mediaByTitle = useMemo(() => new Map(media.map((item) => [item.title, item])), [media])
 
-  const toggleListItem = (listName: string, title: string) => setLists((current) => {
-    const items = current[listName] ?? []
-    return { ...current, [listName]: items.includes(title) ? items.filter((item) => item !== title) : [...items, title] }
-  })
+  const toggleListItem = (listName: string, title: string) =>
+    setLists((current) => {
+      const items = current[listName] ?? []
+      return {
+        ...current,
+        [listName]: items.includes(title)
+          ? items.filter((item) => item !== title)
+          : [...items, title],
+      }
+    })
 
   const createList = () => {
     const name = newListName.trim()
@@ -88,11 +100,12 @@ function App() {
     setEditingList(null)
   }
 
-  const removeList = (listName: string) => setLists((current) => {
-    const next = { ...current }
-    delete next[listName]
-    return next
-  })
+  const removeList = (listName: string) =>
+    setLists((current) => {
+      const next = { ...current }
+      delete next[listName]
+      return next
+    })
 
   return (
     <AppShell
@@ -106,17 +119,107 @@ function App() {
       onQueryChange={setQuery}
     >
       <Routes>
-        <Route path="/" element={<HomePage media={films} continueWatching={continueWatching} query={query} lists={lists} listPicker={listPicker} onListPickerChange={setListPicker} onToggleList={toggleListItem} onCreateList={() => setCreateListModal(true)} onPlay={setSelected} />} />
-        <Route path="/movies" element={<MoviesPage media={films} query={query} lists={lists} listPicker={listPicker} onListPickerChange={setListPicker} onToggleList={toggleListItem} onCreateList={() => setCreateListModal(true)} onPlay={setSelected} />} />
-        <Route path="/series" element={<SeriesPage media={series} lists={lists} listPicker={listPicker} onListPickerChange={setListPicker} onToggleList={toggleListItem} onCreateList={() => setCreateListModal(true)} onPlay={setSelected} />} />
-        <Route path="/list" element={<ListsPage lists={lists} mediaByTitle={mediaByTitle} onPlay={setSelected} onToggleList={toggleListItem} onCreateList={() => setCreateListModal(true)} onRename={(name) => { setEditingList(name); setEditedListName(name) }} onRemove={removeList} />} />
-        <Route path="/profile" element={<ProfilePage profileName={profileName} profileInitials={profileInitials} listsCount={Object.keys(lists).length} savedCount={Object.values(lists).flat().length} onNameChange={(value) => { setProfileName(value); setProfileInitials(value.trim().slice(0, 2).toUpperCase() || '??') }} onInitialsChange={setProfileInitials} />} />
+        <Route
+          path="/"
+          element={
+            <HomePage
+              media={films}
+              continueWatching={continueWatching}
+              query={query}
+              lists={lists}
+              listPicker={listPicker}
+              onListPickerChange={setListPicker}
+              onToggleList={toggleListItem}
+              onCreateList={() => setCreateListModal(true)}
+              onPlay={setSelected}
+            />
+          }
+        />
+        <Route
+          path="/movies"
+          element={
+            <MoviesPage
+              media={films}
+              query={query}
+              lists={lists}
+              listPicker={listPicker}
+              onListPickerChange={setListPicker}
+              onToggleList={toggleListItem}
+              onCreateList={() => setCreateListModal(true)}
+              onPlay={setSelected}
+            />
+          }
+        />
+        <Route
+          path="/series"
+          element={
+            <SeriesPage
+              media={series}
+              lists={lists}
+              listPicker={listPicker}
+              onListPickerChange={setListPicker}
+              onToggleList={toggleListItem}
+              onCreateList={() => setCreateListModal(true)}
+              onPlay={setSelected}
+            />
+          }
+        />
+        <Route
+          path="/list"
+          element={
+            <ListsPage
+              lists={lists}
+              mediaByTitle={mediaByTitle}
+              onPlay={setSelected}
+              onToggleList={toggleListItem}
+              onCreateList={() => setCreateListModal(true)}
+              onRename={(name) => {
+                setEditingList(name)
+                setEditedListName(name)
+              }}
+              onRemove={removeList}
+            />
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <ProfilePage
+              profileName={profileName}
+              profileInitials={profileInitials}
+              listsCount={Object.keys(lists).length}
+              savedCount={Object.values(lists).flat().length}
+              onNameChange={(value) => {
+                setProfileName(value)
+                setProfileInitials(value.trim().slice(0, 2).toUpperCase() || '??')
+              }}
+              onInitialsChange={setProfileInitials}
+            />
+          }
+        />
         <Route path="/admin" element={<AdminPage />} />
       </Routes>
 
       {selected && <MediaPlayerModal media={selected} onClose={() => setSelected(null)} />}
-      {createListModal && <CreateListModal name={newListName} lists={lists} onChange={setNewListName} onClose={() => setCreateListModal(false)} onCreate={createList} />}
-      {editingList && <RenameListModal name={editedListName} lists={lists} originalName={editingList} onChange={setEditedListName} onClose={() => setEditingList(null)} onRename={renameList} />}
+      {createListModal && (
+        <CreateListModal
+          name={newListName}
+          lists={lists}
+          onChange={setNewListName}
+          onClose={() => setCreateListModal(false)}
+          onCreate={createList}
+        />
+      )}
+      {editingList && (
+        <RenameListModal
+          name={editedListName}
+          lists={lists}
+          originalName={editingList}
+          onChange={setEditedListName}
+          onClose={() => setEditingList(null)}
+          onRename={renameList}
+        />
+      )}
     </AppShell>
   )
 }
