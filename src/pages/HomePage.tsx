@@ -1,8 +1,7 @@
-import { ChevronDown, Play, Plus } from 'lucide-react'
+import { ChevronDown, Play } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ContinueCard, MediaCard } from '../components/MediaCard'
 import { EmptyState } from '../components/EmptyState'
-import { ListPicker } from '../components/ListPicker'
 import type { MediaItem } from '../types'
 
 type HomePageProps = {
@@ -30,7 +29,6 @@ export function HomePage({
 }: HomePageProps) {
   const filtered = media.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()))
   const hero = media.find((item) => item.title === 'Dune: Part Two') ?? media[0]
-  const isSaved = hero ? Object.values(lists).some((items) => items.includes(hero.title)) : false
   return (
     <div>
       {hero && (
@@ -60,23 +58,6 @@ export function HomePage({
               >
                 <Play size={15} fill="currentColor" /> PLAY
               </button>
-              <button
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onListPickerChange(listPicker === hero.title ? null : hero.title)
-                }}
-                className="flex items-center gap-2 border border-[#416846] px-5 py-3 text-xs text-[#b5d7b0] hover:border-[#8dff66]"
-              >
-                <Plus size={15} /> {isSaved ? 'IN MY LISTS' : 'ADD TO LIST'}
-              </button>
-              {listPicker === hero.title && (
-                <ListPicker
-                  title={hero.title}
-                  lists={lists}
-                  onToggle={onToggleList}
-                  onCreate={onCreateList}
-                />
-              )}
             </div>
             <div className="mt-7 flex gap-5 text-[10px] text-[#769078]">
               <span className="text-[#8dff66]">{hero.badge ?? 'UHD'}</span>

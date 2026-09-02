@@ -9,9 +9,17 @@ body {
   background: #07100b;
 }
 button,
-input,
-select,
-textarea {
+select {
   font: inherit;
   cursor: pointer;
+}
+
+input[type='range'] {
+  cursor: pointer;
+}
+
+input:not([type='range']),
+textarea {
+  font: inherit;
+  cursor: text;
 }

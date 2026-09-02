@@ -17,11 +17,11 @@ export function CreateListModal({
   const disabled = !name.trim() || Boolean(lists[name.trim()])
   return (
     <div
-      className="fixed inset-0 z-30 grid place-items-center bg-[#020603e8] p-4"
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#020603e8] p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm border border-[#416846] bg-[#09130c] p-6 shadow-[0_20px_100px_#000]"
+        className="my-auto max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-xl border border-[#416846] bg-[#09130c] p-6 shadow-[0_20px_100px_#000]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between">
@@ -78,11 +78,11 @@ export function RenameListModal({
   const disabled = !name.trim() || Boolean(lists[name.trim()] && name.trim() !== originalName)
   return (
     <div
-      className="fixed inset-0 z-30 grid place-items-center bg-[#020603e8] p-4"
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-[#020603e8] p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm border border-[#416846] bg-[#09130c] p-6 shadow-[0_20px_100px_#000]"
+        className="my-auto max-h-[calc(100vh-2rem)] w-full max-w-sm overflow-y-auto rounded-xl border border-[#416846] bg-[#09130c] p-6 shadow-[0_20px_100px_#000]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between">

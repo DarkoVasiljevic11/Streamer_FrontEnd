@@ -5,6 +5,7 @@ import type { MediaItem } from '../types'
 type ListsPageProps = {
   lists: Record<string, string[]>
   mediaByTitle: Map<string, MediaItem>
+  query: string
   onPlay: (media: MediaItem) => void
   onToggleList: (listName: string, title: string) => void
   onCreateList: () => void
@@ -15,6 +16,7 @@ type ListsPageProps = {
 export function ListsPage({
   lists,
   mediaByTitle,
+  query,
   onPlay,
   onToggleList,
   onCreateList,
@@ -37,7 +39,9 @@ export function ListsPage({
       </div>
       {Object.keys(lists).length ? (
         <div className="grid gap-5 md:grid-cols-2">
-          {Object.entries(lists).map(([listName, titles]) => (
+          {Object.entries(lists).map(([listName, titles]) => {
+            const visibleTitles = titles.filter((title) => title.toLowerCase().includes(query.toLowerCase()))
+            return (
             <div key={listName} className="border border-[#1f3823] bg-[#09130c] p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -59,9 +63,9 @@ export function ListsPage({
                   </button>
                 </div>
               </div>
-              {titles.length ? (
+              {visibleTitles.length ? (
                 <div className="mt-5 grid gap-3">
-                  {titles.map((title) => (
+                  {visibleTitles.map((title) => (
                     <div
                       key={title}
                       className="flex items-center justify-between border-t border-[#1f3823] pt-3 text-xs text-[#b5d7b0]"
@@ -90,11 +94,12 @@ export function ListsPage({
                 </div>
               ) : (
                 <p className="mt-5 border-t border-[#1f3823] pt-3 text-xs text-[#68826b]">
-                  No titles added yet.
+                  {query ? 'No titles match your search.' : 'No titles added yet.'}
                 </p>
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
       ) : (
         <EmptyState message="Create a list to organize your library." />

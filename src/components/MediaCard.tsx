@@ -32,12 +32,12 @@ export function MediaCard({
         <button
           aria-label={`Add ${media.title} to a list`}
           onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => onListPickerChange(listPicker === media.title ? null : media.title)}
+          onClick={() => onListPickerChange(listPicker === media.id ? null : media.id)}
           className="absolute right-2 top-2 z-10 grid h-7 w-7 place-items-center bg-[#07100bcc] text-lg text-[#8dff66]"
         >
           {isSaved ? '✓' : <Plus size={16} />}
         </button>
-        {listPicker === media.title && (
+        {listPicker === media.id && (
           <ListPicker
             title={media.title}
             lists={lists}

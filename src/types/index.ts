@@ -1,5 +1,16 @@
 export type MediaType = 'movie' | 'series'
 
+export type MediaVariant = {
+  quality: string
+  url: string
+}
+
+export type SubtitleTrack = {
+  label: string
+  language: string
+  url: string
+}
+
 export type MediaItem = {
   id: string
   title: string
@@ -10,11 +21,29 @@ export type MediaItem = {
   posterUrl?: string
   previewUrl?: string
   subtitleUrl?: string
+  subtitleTracks?: SubtitleTrack[]
+  fileUrl?: string
+  mediaUrl?: string
+  variants?: MediaVariant[]
   duration?: string
   episodeLabel?: string
   progress?: number
   badge?: string
   source: 'api' | 'demo'
+}
+
+export type UserProfile = {
+  id: string
+  username: string
+  displayName: string
+  role: 'user' | 'admin'
+  lists: Record<string, string[]>
+  continueWatching: Array<{
+    mediaId: string
+    title: string
+    progress: number
+    posterUrl?: string
+  }>
 }
 
 export type MediaCardProps = {
@@ -29,9 +58,12 @@ export type MediaCardProps = {
 
 export type ProfileProps = {
   profileName: string
+  username: string
   profileInitials: string
   listsCount: number
   savedCount: number
   onNameChange: (value: string) => void
   onInitialsChange: (value: string) => void
+  onSaveAccount: (payload: { username?: string; password?: string; displayName?: string }) => Promise<void> | void
+  onLogout: () => void
 }

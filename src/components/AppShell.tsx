@@ -1,5 +1,5 @@
-import { Film, Home, List, Shield } from 'lucide-react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Film, Home, List } from 'lucide-react'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 
 type AppShellProps = {
@@ -12,6 +12,8 @@ type AppShellProps = {
   loading: boolean
   query: string
   onQueryChange: (value: string) => void
+  searchSuggestions: string[]
+  onSearchSelect: (value: string) => void
 }
 
 const navItems = [
@@ -19,7 +21,6 @@ const navItems = [
   { label: 'Movies', icon: Film, to: '/movies' },
   { label: 'Series', icon: Film, to: '/series' },
   { label: 'My list', icon: List, to: '/list' },
-  { label: 'Admin', icon: Shield, to: '/admin' },
 ]
 
 export function AppShell({
@@ -32,10 +33,13 @@ export function AppShell({
   loading,
   query,
   onQueryChange,
+  searchSuggestions,
+  onSearchSelect,
 }: AppShellProps) {
   const location = useLocation()
+  const navigate = useNavigate()
   const pageName =
-    location.pathname === '/list'
+    location.pathname.startsWith('/list')
       ? 'MY LISTS'
       : location.pathname === '/profile'
         ? 'PROFILE'
@@ -87,21 +91,44 @@ export function AppShell({
         </div>
       </aside>
       <main className="mx-auto max-w-[1450px] px-5 lg:ml-60 lg:px-14">
-        <header className="flex h-20 items-center gap-5 border-b border-[#1f3823]">
+        <header className="relative flex h-20 items-center gap-5 border-b border-[#1f3823]">
           <Link to="/" className="font-bold tracking-[-0.12em] text-[#c7f5bc] lg:hidden">
             <span className="mr-2 text-[#8dff66]">✦</span>streamer
           </Link>
           <div className="hidden text-[11px] tracking-widest text-[#668066] lg:block">
             <span className="text-[#8dff66]">LIBRARY</span> / {pageName}
           </div>
-          <label className="ml-auto flex w-full max-w-xs items-center gap-2 border-b border-[#29442c] py-2 text-[#668066]">
+          <label className="relative ml-auto flex w-full max-w-xs items-center gap-2 border-b border-[#29442c] py-2 text-[#668066]">
             <input
               aria-label="Search archive"
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && query.trim()) {
+                  event.preventDefault()
+                  navigate('/movies')
+                }
+              }}
               placeholder="search archive..."
-              className="w-full bg-transparent text-xs text-[#c7f5bc] outline-none placeholder:text-[#526b56]"
+              className="w-full cursor-text bg-transparent text-xs text-[#c7f5bc] outline-none placeholder:text-[#526b56]"
             />
+            {query.trim() && searchSuggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-64 overflow-y-auto rounded-lg border border-[#29442c] bg-[#0b1910] p-1 shadow-2xl">
+                {searchSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      onSearchSelect(suggestion)
+                      navigate('/movies')
+                    }}
+                    className="block w-full cursor-pointer rounded-md px-3 py-2 text-left text-xs text-[#b5d7b0] hover:bg-[#18351f] hover:text-[#baffaa]"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
           </label>
           <Link
             to="/profile"
