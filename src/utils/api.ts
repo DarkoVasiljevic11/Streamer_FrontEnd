@@ -136,6 +136,7 @@ export type CreateMediaInput = {
  subtitleUrl: string
  subtitleTracks?: Array<{ label: string; language: string; url: string }>
  file?: File
+ libraryPath?: string
 }
 
 export async function createMedia(
@@ -155,6 +156,7 @@ export async function createMedia(
  formData.append('subtitleUrl', input.subtitleUrl.trim())
  if (input.subtitleTracks?.length) formData.append('subtitleTracks', JSON.stringify(input.subtitleTracks))
  if (input.file) formData.append('file', input.file, input.file.name)
+ if (input.libraryPath?.trim()) formData.append('libraryPath', input.libraryPath.trim())
  const result = await requestJson<ApiMedia>(
    '/api/admin/media',
    { token, signal },

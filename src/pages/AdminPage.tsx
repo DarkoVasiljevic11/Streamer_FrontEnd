@@ -28,6 +28,7 @@ export function AdminPage({
   const [genreText, setGenreText] = useState('')
   const [subtitleTracksText, setSubtitleTracksText] = useState('')
   const [file, setFile] = useState<File | undefined>()
+  const [libraryPath, setLibraryPath] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -73,8 +74,12 @@ export function AdminPage({
       setError('Enter a valid year.')
       return
     }
-    if (!form.posterUrl.trim() && !file) {
-      setError('Provide a poster URL or select a media file.')
+    if (!form.posterUrl.trim() && !file && !libraryPath.trim()) {
+      setError('Provide a poster URL, upload a file, or enter a library path.')
+      return
+    }
+    if (file && libraryPath.trim()) {
+      setError('Choose either an uploaded file or an existing library path, not both.')
       return
     }
     const urls = [form.posterUrl, form.previewUrl, form.subtitleUrl].filter(Boolean)
@@ -112,7 +117,7 @@ export function AdminPage({
     }
     setSaving(true)
     try {
-      await createMedia({ ...form, title, genres, subtitleTracks, file }, token)
+      await createMedia({ ...form, title, genres, subtitleTracks, file, libraryPath }, token)
       sessionStorage.setItem(TOKEN_KEY, token)
       setMessage('Media upload accepted by the backend.')
       setForm({
@@ -129,6 +134,7 @@ export function AdminPage({
       setGenreText('')
       setSubtitleTracksText('')
       setFile(undefined)
+      setLibraryPath('')
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Upload failed.')
     } finally {
@@ -281,6 +287,16 @@ export function AdminPage({
                 onChange={(event) => setFile(event.target.files?.[0])}
                 className="mt-2 block w-full text-xs text-[#b5d7b0] file:mr-3 file:border-0 file:bg-[#8dff66] file:px-3 file:py-2 file:text-xs file:font-bold file:text-[#07100b]"
               />
+            </label>
+            <label className="block text-[10px] text-[#68826b] sm:col-span-2">
+              EXISTING LIBRARY FILE (RELATIVE TO MEDIA_ROOTS)
+              <input
+                value={libraryPath}
+                onChange={(event) => setLibraryPath(event.target.value)}
+                placeholder="Movies/Example/movie.mp4"
+                className="mt-2 w-full border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs text-[#c7f5bc] outline-none focus:border-[#8dff66]"
+              />
+              <span className="mt-2 block text-[10px] text-[#68826b]">Use this instead of uploading to avoid copying an existing server file.</span>
             </label>
             <button
               type="submit"
