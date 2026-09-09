@@ -191,6 +191,16 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
           manifestLoadingTimeOut: 120_000,
           levelLoadingTimeOut: 120_000,
           fragLoadingTimeOut: 60_000,
+
+          /*
+           * Always start at the beginning, never at the "live
+           * edge". Belt-and-suspenders alongside the backend
+           * sending -hls_playlist_type vod: without this, a
+           * client that loads the manifest in the split second
+           * before that tag is written would still auto-seek into
+           * the stream instead of starting at 0.
+           */
+          startPosition: 0,
         })
 
         hls.on(Hls.Events.MEDIA_ATTACHED, () => {
