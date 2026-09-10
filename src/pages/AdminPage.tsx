@@ -1,6 +1,6 @@
-﻿import { useState, type FormEvent } from 'react'
-import { createMedia, loginAdmin, type CreateMediaInput } from '../utils/api'
-import type { MediaType, UserProfile } from '../types'
+﻿import { useEffect, useState, type FormEvent } from 'react'
+import { createMedia, deleteMedia, fetchEpisodes, fetchMedia, loginAdmin, type CreateMediaInput } from '../utils/api'
+import type { MediaItem, MediaType, UserProfile } from '../types'
 
 const TOKEN_KEY = 'streamer.adminToken'
 
@@ -24,6 +24,7 @@ export function AdminPage({
     previewUrl: '',
     subtitleUrl: '',
     subtitleTracks: [],
+    imdbId: '',
   })
   const [genreText, setGenreText] = useState('')
   const [subtitleTracksText, setSubtitleTracksText] = useState('')
@@ -33,6 +34,22 @@ export function AdminPage({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [loggingIn, setLoggingIn] = useState(false)
+  const [seriesOptions, setSeriesOptions] = useState<MediaItem[]>([])
+  const [libraryItems, setLibraryItems] = useState<MediaItem[]>([])
+  const [libraryRefreshKey, setLibraryRefreshKey] = useState(0)
+
+  useEffect(() => {
+    if (!token) return
+    fetchMedia({})
+      .then((items) => {
+        setLibraryItems(items)
+        setSeriesOptions(items.filter((item) => item.type === 'series'))
+      })
+      .catch(() => {
+        setLibraryItems([])
+        setSeriesOptions([])
+      })
+  }, [token, message, libraryRefreshKey])
 
   const update = <K extends keyof CreateMediaInput>(key: K, value: CreateMediaInput[K]) =>
     setForm((current) => ({ ...current, [key]: value }))
@@ -74,8 +91,14 @@ export function AdminPage({
       setError('Enter a valid year.')
       return
     }
-    if (!form.posterUrl.trim() && !file && !libraryPath.trim()) {
-      setError('Provide a poster URL, upload a file, or enter a library path.')
+    if (form.type === 'series') {
+      /*
+       * A series is just a metadata container - the episodes
+       * underneath it are what actually have video files. Don't
+       * force a poster/file/libraryPath just to create the row.
+       */
+    } else if (!file && !libraryPath.trim()) {
+      setError('Upload a video file or enter an existing library path.')
       return
     }
     if (file && libraryPath.trim()) {
@@ -99,6 +122,20 @@ export function AdminPage({
     if (file && file.type && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
       setError('Select a video or audio media file.')
       return
+    }
+    if (form.type === 'episode') {
+      if (!form.seriesId) {
+        setError('Choose which series this episode belongs to.')
+        return
+      }
+      if (!form.season || form.season < 1) {
+        setError('Enter a valid season number.')
+        return
+      }
+      if (!form.episodeNumber || form.episodeNumber < 1) {
+        setError('Enter a valid episode number.')
+        return
+      }
     }
     const genres = genreText
       .split(',')
@@ -130,6 +167,7 @@ export function AdminPage({
         previewUrl: '',
         subtitleUrl: '',
         subtitleTracks: [],
+        imdbId: '',
       })
       setGenreText('')
       setSubtitleTracksText('')
@@ -245,9 +283,50 @@ export function AdminPage({
               >
                 <option value="movie">Movie</option>
                 <option value="series">TV show</option>
+                <option value="episode">Episode</option>
               </select>
             </label>
+            {form.type === 'episode' && (
+              <>
+                <label className="block text-[10px] text-[#68826b]">
+                  SERIES
+                  <select
+                    value={form.seriesId ?? ''}
+                    onChange={(event) => update('seriesId', event.target.value)}
+                    className="mt-2 w-full border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs text-[#c7f5bc]"
+                  >
+                    <option value="">Select a series…</option>
+                    {seriesOptions.map((series) => (
+                      <option key={series.id} value={series.id}>
+                        {series.title}
+                      </option>
+                    ))}
+                  </select>
+                  {seriesOptions.length === 0 && (
+                    <span className="mt-2 block text-[10px] text-[#68826b]">
+                      No series exist yet - add one with type "TV show" first.
+                    </span>
+                  )}
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  {field('SEASON', 'season', 'number')}
+                  {field('EPISODE #', 'episodeNumber', 'number')}
+                </div>
+              </>
+            )}
             {field('YEAR', 'year', 'number')}
+            <label className="block text-[10px] text-[#68826b]">
+              IMDB ID {form.type === 'episode' ? '(OPTIONAL - INHERITS FROM SERIES)' : '(OPTIONAL, ENABLES SUBTITLE SEARCH)'}
+              <input
+                value={form.imdbId ?? ''}
+                onChange={(event) => update('imdbId', event.target.value)}
+                placeholder="tt0111161"
+                className="mt-2 w-full border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs text-[#c7f5bc] outline-none focus:border-[#8dff66]"
+              />
+              <span className="mt-2 block text-[10px] text-[#68826b]">
+                Find it in the title's IMDb URL, e.g. imdb.com/title/<strong>tt0111161</strong>/
+              </span>
+            </label>
             <label className="block text-[10px] text-[#68826b]">
               GENRES (COMMA SEPARATED)
               <input
@@ -307,7 +386,150 @@ export function AdminPage({
             </button>
           </form>
         )}
+
+        {token && (
+          <LibraryManager
+            token={token}
+            items={libraryItems}
+            onChanged={() => setLibraryRefreshKey((key) => key + 1)}
+          />
+        )}
       </div>
     </section>
+  )
+}
+
+function LibraryManager({
+  token,
+  items,
+  onChanged,
+}: {
+  token: string
+  items: MediaItem[]
+  onChanged: () => void
+}) {
+  const [expanded, setExpanded] = useState<Record<string, MediaItem[] | 'loading' | undefined>>({})
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const toggleSeries = (series: MediaItem) => {
+    setExpanded((current) => {
+      if (current[series.id] !== undefined) {
+        const next = { ...current }
+        delete next[series.id]
+        return next
+      }
+      return { ...current, [series.id]: 'loading' }
+    })
+    if (expanded[series.id] === undefined) {
+      fetchEpisodes(series.id)
+        .then((episodes) => setExpanded((current) => ({ ...current, [series.id]: episodes })))
+        .catch(() => setExpanded((current) => ({ ...current, [series.id]: [] })))
+    }
+  }
+
+  const handleDelete = async (item: MediaItem, seriesId?: string) => {
+    const label = item.type === 'episode'
+      ? `episode "${item.title}"`
+      : `"${item.title}"${item.type === 'series' ? ' and all of its episodes' : ''}`
+    if (!window.confirm(`Delete ${label}? This cannot be undone.`)) return
+
+    setError(null)
+    setDeletingId(item.id)
+    try {
+      await deleteMedia(item.id, token)
+      if (seriesId) {
+        setExpanded((current) => {
+          const list = current[seriesId]
+          if (!Array.isArray(list)) return current
+          return { ...current, [seriesId]: list.filter((episode) => episode.id !== item.id) }
+        })
+      } else {
+        onChanged()
+      }
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Delete failed.')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  return (
+    <div className="mt-10 border border-[#1f3823] bg-[#09130c] p-5">
+      <h2 className="text-sm font-bold tracking-widest text-[#8dff66]">MANAGE LIBRARY</h2>
+      <p className="mt-2 text-xs text-[#68826b]">
+        Deleting a movie or episode removes its uploaded file and cached video. Deleting a series
+        also removes every episode under it.
+      </p>
+
+      {error && (
+        <p className="mt-3 text-xs text-red-300" role="alert">
+          {error}
+        </p>
+      )}
+
+      {items.length === 0 && (
+        <p className="mt-4 text-xs text-[#68826b]">Nothing in the library yet.</p>
+      )}
+
+      <ul className="mt-4 flex flex-col divide-y divide-[#1f3823]">
+        {items.map((item) => (
+          <li key={item.id} className="py-3">
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => item.type === 'series' && toggleSeries(item)}
+                disabled={item.type !== 'series'}
+                className="min-w-0 flex-1 text-left disabled:cursor-default"
+              >
+                <span className="block truncate text-sm text-[#c7f5bc]">
+                  {item.type === 'series' ? (expanded[item.id] !== undefined ? '▾ ' : '▸ ') : ''}
+                  {item.title}
+                  {item.year ? ` (${item.year})` : ''}
+                </span>
+                <span className="mt-0.5 block text-[10px] uppercase tracking-widest text-[#68826b]">
+                  {item.type}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDelete(item)}
+                disabled={deletingId === item.id}
+                className="shrink-0 border border-[#5a2222] px-3 py-2 text-[10px] font-bold text-red-300 hover:bg-[#2a1414] disabled:opacity-40"
+              >
+                {deletingId === item.id ? 'DELETING…' : 'DELETE'}
+              </button>
+            </div>
+
+            {item.type === 'series' && expanded[item.id] === 'loading' && (
+              <p className="mt-2 pl-4 text-xs text-[#68826b]">Loading episodes…</p>
+            )}
+
+            {item.type === 'series' && Array.isArray(expanded[item.id]) && (
+              <ul className="mt-2 flex flex-col gap-1 border-l border-[#1f3823] pl-4">
+                {(expanded[item.id] as MediaItem[]).length === 0 && (
+                  <li className="text-xs text-[#68826b]">No episodes added yet.</li>
+                )}
+                {(expanded[item.id] as MediaItem[]).map((episode) => (
+                  <li key={episode.id} className="flex items-center justify-between gap-3 py-1">
+                    <span className="min-w-0 flex-1 truncate text-xs text-[#b5d7b0]">
+                      S{episode.season}E{episode.episodeNumber} · {episode.title}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(episode, item.id)}
+                      disabled={deletingId === episode.id}
+                      className="shrink-0 border border-[#5a2222] px-2 py-1 text-[10px] font-bold text-red-300 hover:bg-[#2a1414] disabled:opacity-40"
+                    >
+                      {deletingId === episode.id ? 'DELETING…' : 'DELETE'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

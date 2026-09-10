@@ -2,7 +2,7 @@ import { Maximize, Pause, Play, Volume2, VolumeX, X } from 'lucide-react'
 import Hls from 'hls.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaItem } from '../types'
-import { fetchSubtitleTracks } from '../utils/api'
+import { fetchSubtitleTracks, searchSubtitles } from '../utils/api'
 
 type Props = {
   media: MediaItem
@@ -56,7 +56,10 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
   }, [media, quality])
 
   /*
-   * Load subtitle tracks
+   * Load subtitle tracks: whatever's statically configured on the
+   * media item, plus anything found via online subtitle search
+   * (see subtitles.go on the backend - this calls Wyzie Subs
+   * through our own proxy, never the provider directly).
    */
   useEffect(() => {
     let cancelled = false
@@ -64,18 +67,41 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
     const loadSubtitles = async () => {
       setSubtitleError(null)
 
-      try {
-        const tracks = await fetchSubtitleTracks(media.id)
+      const [staticResult, searchResult] = await Promise.allSettled([
+        fetchSubtitleTracks(media.id),
+        searchSubtitles(media.id),
+      ])
 
-        if (!cancelled && tracks) {
-          setSubtitleTracks(tracks)
-        }
-      } catch (error) {
-        console.error('Failed to load subtitle tracks:', error)
+      if (cancelled) return
 
-        if (!cancelled) {
-          setSubtitleError('Unable to load subtitles.')
+      const combined = [
+        ...(staticResult.status === 'fulfilled' && staticResult.value ? staticResult.value : []),
+      ]
+
+      if (searchResult.status === 'fulfilled') {
+        if (searchResult.value.message) {
+          console.info('[subtitles]', searchResult.value.message)
         }
+
+        /*
+         * De-dupe by label so a title that already has a manually
+         * configured track for a language doesn't show it twice.
+         */
+        const existingLabels = new Set(combined.map((track) => track.label))
+        for (const track of searchResult.value.results) {
+          if (existingLabels.has(track.label)) continue
+          existingLabels.add(track.label)
+          combined.push(track)
+        }
+      } else {
+        console.error('Online subtitle search failed:', searchResult.reason)
+      }
+
+      setSubtitleTracks(combined)
+
+      if (staticResult.status === 'rejected') {
+        console.error('Failed to load subtitle tracks:', staticResult.reason)
+        setSubtitleError('Unable to load some subtitles.')
       }
     }
 

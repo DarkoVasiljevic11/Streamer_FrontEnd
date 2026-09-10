@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { CreateListModal, RenameListModal } from './components/ListModals'
 import MediaPlayerModal from './components/MediaPlayerModal'
+import { SeriesEpisodesModal } from './components/SeriesEpisodesModal'
 import { DEMO_MEDIA } from './utils/demoData'
 import { fetchCurrentUser, fetchMedia, saveUserState, updateUserAccount } from './utils/api'
 import { AdminPage } from './pages/AdminPage'
@@ -43,6 +44,20 @@ function App() {
   const [lists, setLists] = useState<Record<string, string[]>>(defaultLists)
   const [listPicker, setListPicker] = useState<string | null>(null)
   const [selected, setSelected] = useState<MediaItem | null>(null)
+  const [selectedSeries, setSelectedSeries] = useState<MediaItem | null>(null)
+
+  /*
+   * Series don't have a video of their own - clicking one should
+   * open the episode picker instead of trying to play it directly.
+   * Movies (and episodes selected from that picker) play as before.
+   */
+  const handleMediaSelect = (item: MediaItem) => {
+    if (item.type === 'series') {
+      setSelectedSeries(item)
+      return
+    }
+    setSelected(item)
+  }
   const [createListModal, setCreateListModal] = useState(false)
   const [newListName, setNewListName] = useState('')
   const [editingList, setEditingList] = useState<string | null>(null)
@@ -268,7 +283,7 @@ function App() {
               onListPickerChange={setListPicker}
               onToggleList={toggleListItem}
               onCreateList={openCreateList}
-              onPlay={setSelected}
+              onPlay={handleMediaSelect}
             />
           }
         />
@@ -283,7 +298,7 @@ function App() {
               onListPickerChange={setListPicker}
               onToggleList={toggleListItem}
               onCreateList={openCreateList}
-              onPlay={setSelected}
+              onPlay={handleMediaSelect}
             />
           }
         />
@@ -298,7 +313,7 @@ function App() {
               onListPickerChange={setListPicker}
               onToggleList={toggleListItem}
               onCreateList={openCreateList}
-              onPlay={setSelected}
+              onPlay={handleMediaSelect}
             />
           }
         />
@@ -309,7 +324,7 @@ function App() {
               lists={lists}
               mediaByTitle={mediaByTitle}
               query={query}
-              onPlay={setSelected}
+              onPlay={handleMediaSelect}
               onToggleList={toggleListItem}
               onCreateList={openCreateList}
               onRename={(name) => {
@@ -362,6 +377,16 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
+      {selectedSeries && (
+        <SeriesEpisodesModal
+          series={selectedSeries}
+          onClose={() => setSelectedSeries(null)}
+          onPlayEpisode={(episode) => {
+            setSelectedSeries(null)
+            setSelected(episode)
+          }}
+        />
+      )}
       {selected && (
         <MediaPlayerModal
           media={selected}

@@ -101,6 +101,48 @@ export async function fetchMedia(
  return items.map(normalizeMedia)
 }
 
+export async function fetchEpisodes(
+  seriesId: string,
+  signal?: AbortSignal,
+): Promise<MediaItem[]> {
+  const result = await requestJson<{ items: ApiMedia[] }>(
+    `/api/media/${encodeURIComponent(seriesId)}/episodes`,
+    { signal },
+  )
+  return result.items.map(normalizeMedia)
+}
+
+export type SubtitleSearchResult = {
+  label: string
+  language: string
+  url: string
+}
+
+export async function searchSubtitles(
+  mediaId: string,
+  language = 'en',
+  signal?: AbortSignal,
+): Promise<{ results: SubtitleSearchResult[]; message?: string }> {
+  const result = await requestJson<{ results: SubtitleSearchResult[]; message?: string }>(
+    `/api/media/${encodeURIComponent(mediaId)}/subtitles/search?language=${encodeURIComponent(language)}`,
+    { signal },
+  )
+  return {
+    message: result.message,
+    results: result.results.map((track) => ({
+      ...track,
+      url: (() => {
+        if (!API_URL) return track.url
+        try {
+          return new URL(track.url, `${API_URL}/`).toString()
+        } catch {
+          return track.url
+        }
+      })(),
+    })),
+  }
+}
+
 export async function lookupPreviewImage(
  title: string,
  signal?: AbortSignal,
@@ -137,6 +179,10 @@ export type CreateMediaInput = {
  subtitleTracks?: Array<{ label: string; language: string; url: string }>
  file?: File
  libraryPath?: string
+ imdbId?: string
+ seriesId?: string
+ season?: number
+ episodeNumber?: number
 }
 
 export async function createMedia(
@@ -157,6 +203,12 @@ export async function createMedia(
  if (input.subtitleTracks?.length) formData.append('subtitleTracks', JSON.stringify(input.subtitleTracks))
  if (input.file) formData.append('file', input.file, input.file.name)
  if (input.libraryPath?.trim()) formData.append('libraryPath', input.libraryPath.trim())
+ if (input.imdbId?.trim()) formData.append('imdbId', input.imdbId.trim())
+ if (input.type === 'episode') {
+   if (input.seriesId) formData.append('seriesId', input.seriesId)
+   if (input.season) formData.append('season', String(input.season))
+   if (input.episodeNumber) formData.append('episodeNumber', String(input.episodeNumber))
+ }
  const result = await requestJson<ApiMedia>(
    '/api/admin/media',
    { token, signal },
@@ -213,6 +265,39 @@ export async function updateUserAccount(
    method: 'PUT',
    body: JSON.stringify(payload),
  })
+}
+
+export async function deleteMedia(id: string, token: string, signal?: AbortSignal): Promise<void> {
+  if (!token.trim()) throw new ApiError('An admin token is required.')
+  if (!API_URL)
+    throw new ApiError('Media backend is not configured. Set VITE_API_URL to connect it.')
+
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const abortExternal = () => controller.abort()
+  signal?.addEventListener('abort', abortExternal, { once: true })
+
+  try {
+    const response = await fetch(`${API_URL}/api/admin/media/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+    // A successful delete returns 204 No Content - there's no body
+    // to parse, unlike every other endpoint here.
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new ApiError(text || `Media backend returned ${response.status}.`, response.status)
+    }
+  } catch (error) {
+    if (error instanceof ApiError) throw error
+    if (error instanceof DOMException && error.name === 'AbortError')
+      throw new ApiError('Media backend request timed out.')
+    throw new ApiError('Unable to reach the media backend.')
+  } finally {
+    window.clearTimeout(timeout)
+    signal?.removeEventListener('abort', abortExternal)
+  }
 }
 
 export async function loginAdmin(username: string, password: string): Promise<{ token: string; user: UserProfile }> {
