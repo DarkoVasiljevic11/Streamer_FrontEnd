@@ -36,6 +36,16 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
    */
   const [isBuffering, setIsBuffering] = useState(false)
 
+  /*
+   * Fullscreen + auto-hiding controls.
+   *
+   * Controls only ever auto-hide while actually in fullscreen and
+   * playing - in the normal windowed view they always stay put.
+   */
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const hideControlsTimeout = useRef<number | null>(null)
+
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const playerRef = useRef<HTMLDivElement | null>(null)
 
@@ -245,6 +255,7 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
           )
 
           setIsBuffering(false)
+          setIsPlaying(true)
         })
 
         hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
@@ -386,6 +397,27 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
 
     if (isPlaying) {
       void video.play().catch((error) => {
+        /*
+         * Browsers block autoplay with sound unless the user has
+         * already interacted with the page. Opening the player IS
+         * a click, but by the time the stream finishes loading
+         * (which can take a while on a cold transcode) that
+         * "permission" can have expired. If that's what happened,
+         * fall back to starting muted - browsers always allow
+         * that - rather than just giving up and leaving it paused.
+         */
+        if (error instanceof DOMException && error.name === 'NotAllowedError' && !video.muted) {
+          video.muted = true
+          setIsMuted(true)
+
+          void video.play().catch((mutedError) => {
+            console.error('Video play failed even muted:', mutedError)
+            setIsPlaying(false)
+          })
+
+          return
+        }
+
         console.error('Video play failed:', error)
         setIsPlaying(false)
       })
@@ -422,7 +454,20 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
       return
     }
 
-    const percentage = Math.min(100, Math.max(0, (current / total) * 100))
+    /*
+     * Report progress as a whole-number 0-100 percentage.
+     *
+     * IMPORTANT: this must be an integer, not a raw float. The
+     * backend's ContinueWatching.Progress field is a Go `int`, and
+     * encoding/json refuses to unmarshal a fractional number into
+     * an int field at all (it doesn't round it, it just errors) -
+     * sending an unrounded percentage here makes every save of the
+     * continue-watching list fail with 400 the moment any video
+     * has been partially watched.
+     */
+    const percentage = Math.round(
+      Math.min(100, Math.max(0, (current / total) * 100)),
+    )
 
     onProgress(percentage)
   }
@@ -475,6 +520,105 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
   }
 
   /*
+   * Show the controls, then - only while actually in fullscreen
+   * and playing - schedule them to fade out again after a few
+   * seconds of no activity. Any interaction (mouse movement, key
+   * press) calls this again and restarts the clock.
+   */
+  const revealControls = () => {
+    setControlsVisible(true)
+
+    if (hideControlsTimeout.current !== null) {
+      window.clearTimeout(hideControlsTimeout.current)
+      hideControlsTimeout.current = null
+    }
+
+    if (isFullscreen && isPlaying) {
+      hideControlsTimeout.current = window.setTimeout(() => {
+        setControlsVisible(false)
+      }, 3000)
+    }
+  }
+
+  /*
+   * Track fullscreen state (requestFullscreen/exitFullscreen don't
+   * update any React state on their own) and always show controls
+   * again immediately when leaving fullscreen.
+   */
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = document.fullscreenElement === playerRef.current
+
+      setIsFullscreen(active)
+
+      if (!active) {
+        setControlsVisible(true)
+
+        if (hideControlsTimeout.current !== null) {
+          window.clearTimeout(hideControlsTimeout.current)
+          hideControlsTimeout.current = null
+        }
+      }
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+
+      if (hideControlsTimeout.current !== null) {
+        window.clearTimeout(hideControlsTimeout.current)
+      }
+    }
+  }, [])
+
+  /*
+   * Re-evaluate the hide timer whenever play state or fullscreen
+   * state changes - e.g. pausing while fullscreen should bring the
+   * controls back and keep them up until playback resumes.
+   */
+  useEffect(() => {
+    revealControls()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, isFullscreen])
+
+  /*
+   * Keyboard shortcuts: Left/Right seek 5 seconds. Ignored while
+   * focus is on an input/select (e.g. the seek bar and volume
+   * slider already handle arrow keys themselves) or while a
+   * modifier key is held, so this never fights the browser's own
+   * shortcuts.
+   */
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+
+      const video = videoRef.current
+      if (!video) return
+
+      event.preventDefault()
+
+      const skip = event.key === 'ArrowLeft' ? -5 : 5
+      const target = Math.min(
+        Math.max(0, video.currentTime + skip),
+        duration || video.duration || Infinity,
+      )
+
+      video.currentTime = target
+      setCurrentTime(target)
+      revealControls()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duration])
+
+  /*
    * Toggle fullscreen
    */
   const handleFullscreen = async () => {
@@ -500,12 +644,18 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
     >
       <div
         ref={playerRef}
-        className="relative flex h-full max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-black shadow-2xl"
+        className={`relative flex h-full max-h-[90vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-black shadow-2xl ${
+          !controlsVisible ? 'cursor-none' : ''
+        }`}
         onClick={(event) => event.stopPropagation()}
+        onMouseMove={revealControls}
       >
         {/* Header */}
-        <div className="absolute left-0 right-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent p-4">
-          <div>
+        <div
+          className={`absolute left-0 right-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent p-4 transition-opacity duration-300 ${
+            controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+          }`}
+        >          <div>
             <h2 className="text-lg font-semibold text-white">
               {media.title}
             </h2>
@@ -535,6 +685,19 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
             playsInline
             preload="auto"
             poster={media.posterUrl}
+            /*
+             * Required for cross-origin <track> (subtitle) files to
+             * actually load and render. Without this, the browser
+             * silently refuses to display cue text from a different
+             * origin (our backend, typically a different port in
+             * dev) even though the server already sends the right
+             * CORS headers - the dropdown still lets you pick a
+             * track since that's just local state, but nothing
+             * shows up on screen. Doesn't affect normal video
+             * playback: cross-origin <video> already plays fine
+             * without CORS, this only tightens fetches to CORS mode.
+             */
+            crossOrigin="anonymous"
             className="h-full w-full bg-black object-contain"
             style={{
               backgroundImage: media.posterUrl
@@ -550,6 +713,7 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
               setDuration(video.duration || 0)
               setPlayerError(null)
               setIsBuffering(false)
+              setIsPlaying(true)
             }}
             onDurationChange={(event) => {
               setDuration(
@@ -702,7 +866,11 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
           )}
 
           {/* Controls */}
-          <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12">
+          <div
+            className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 via-black/60 to-transparent p-4 pt-12 transition-opacity duration-300 ${
+              controlsVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
+            }`}
+          >
             {/* Progress */}
             <input
               type="range"

@@ -160,7 +160,22 @@ export async function fetchSubtitleTracks(
   const result = await requestJson<{
     tracks: Array<{ label: string; language: string; url: string }>
   }>(`/api/media/${encodeURIComponent(mediaId)}/subtitles`, { signal })
-  return result.tracks
+  // Same reasoning as searchSubtitles: the backend may return a
+  // relative URL (e.g. our own /media/subtitles/proxy path), which
+  // must be resolved against the API origin, not whatever page
+  // happens to be hosting the player - otherwise the browser
+  // requests it from the frontend's own origin and silently 404s.
+  return result.tracks.map((track) => ({
+    ...track,
+    url: (() => {
+      if (!API_URL) return track.url
+      try {
+        return new URL(track.url, `${API_URL}/`).toString()
+      } catch {
+        return track.url
+      }
+    })(),
+  }))
 }
 
 export async function checkHealth(signal?: AbortSignal): Promise<{ ok: boolean }> {
