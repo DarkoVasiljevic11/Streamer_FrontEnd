@@ -101,6 +101,23 @@ export async function fetchMedia(
  return items.map(normalizeMedia)
 }
 
+/*
+Fetches a single media item (movie, series, OR episode) by ID.
+
+Needed for continue-watching: the unscoped /api/media list
+deliberately excludes episodes (see handleMediaList on the
+backend), so resolving a saved "you were watching this episode"
+entry back into a full, playable MediaItem can't go through
+fetchMedia - it has to ask for that one item directly.
+*/
+export async function fetchMediaById(
+  id: string,
+  signal?: AbortSignal,
+): Promise<MediaItem> {
+  const result = await requestJson<ApiMedia>(`/api/media/${encodeURIComponent(id)}`, { signal })
+  return normalizeMedia(result, 0)
+}
+
 export async function fetchEpisodes(
   seriesId: string,
   signal?: AbortSignal,
@@ -189,7 +206,6 @@ export type CreateMediaInput = {
  genres: string[]
  description: string
  posterUrl: string
- previewUrl: string
  subtitleUrl: string
  subtitleTracks?: Array<{ label: string; language: string; url: string }>
  file?: File
@@ -213,7 +229,6 @@ export async function createMedia(
  formData.append('genres', JSON.stringify(input.genres))
  formData.append('description', input.description.trim())
  formData.append('posterUrl', input.posterUrl.trim())
- formData.append('previewUrl', input.previewUrl.trim())
  formData.append('subtitleUrl', input.subtitleUrl.trim())
  if (input.subtitleTracks?.length) formData.append('subtitleTracks', JSON.stringify(input.subtitleTracks))
  if (input.file) formData.append('file', input.file, input.file.name)
@@ -313,6 +328,31 @@ export async function deleteMedia(id: string, token: string, signal?: AbortSigna
     window.clearTimeout(timeout)
     signal?.removeEventListener('abort', abortExternal)
   }
+}
+
+export type MetadataLookupResult = {
+  title?: string
+  year?: number
+  description?: string
+  posterUrl?: string
+  imdbId?: string
+  message?: string
+}
+
+export async function lookupMetadata(
+  params: { title: string; type?: 'movie' | 'series'; season?: number; episode?: number },
+  token: string,
+  signal?: AbortSignal,
+): Promise<MetadataLookupResult> {
+  if (!token.trim()) throw new ApiError('An admin token is required.')
+  const query = new URLSearchParams({ title: params.title })
+  if (params.type) query.set('type', params.type)
+  if (params.season) query.set('season', String(params.season))
+  if (params.episode) query.set('episode', String(params.episode))
+  return requestJson<MetadataLookupResult>(
+    `/api/admin/media/lookup?${query.toString()}`,
+    { token, signal },
+  )
 }
 
 export async function loginAdmin(username: string, password: string): Promise<{ token: string; user: UserProfile }> {

@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState, type FormEvent } from 'react'
-import { createMedia, deleteMedia, fetchEpisodes, fetchMedia, loginAdmin, type CreateMediaInput } from '../utils/api'
+import { createMedia, deleteMedia, fetchEpisodes, fetchMedia, loginAdmin, lookupMetadata, type CreateMediaInput } from '../utils/api'
 import type { MediaItem, MediaType, UserProfile } from '../types'
 
 const TOKEN_KEY = 'streamer.adminToken'
@@ -21,7 +21,6 @@ export function AdminPage({
     genres: [],
     description: '',
     posterUrl: '',
-    previewUrl: '',
     subtitleUrl: '',
     subtitleTracks: [],
     imdbId: '',
@@ -37,6 +36,8 @@ export function AdminPage({
   const [seriesOptions, setSeriesOptions] = useState<MediaItem[]>([])
   const [libraryItems, setLibraryItems] = useState<MediaItem[]>([])
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0)
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [lookupMessage, setLookupMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!token) return
@@ -105,7 +106,7 @@ export function AdminPage({
       setError('Choose either an uploaded file or an existing library path, not both.')
       return
     }
-    const urls = [form.posterUrl, form.previewUrl, form.subtitleUrl].filter(Boolean)
+    const urls = [form.posterUrl, form.subtitleUrl].filter(Boolean)
     if (
       urls.some((value) => {
         try {
@@ -164,7 +165,6 @@ export function AdminPage({
         genres: [],
         description: '',
         posterUrl: '',
-        previewUrl: '',
         subtitleUrl: '',
         subtitleTracks: [],
         imdbId: '',
@@ -177,6 +177,65 @@ export function AdminPage({
       setError(requestError instanceof Error ? requestError.message : 'Upload failed.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleAutofill = async () => {
+    setLookupMessage(null)
+
+    let lookupTitle = form.title.trim()
+    let season: number | undefined
+    let episodeNumber: number | undefined
+
+    if (form.type === 'episode') {
+      const series = seriesOptions.find((option) => option.id === form.seriesId)
+      if (!series) {
+        setLookupMessage('Pick a series first - autofill looks up the episode by the series title.')
+        return
+      }
+      if (!form.season || !form.episodeNumber) {
+        setLookupMessage('Enter a season and episode number first.')
+        return
+      }
+      lookupTitle = series.title
+      season = form.season
+      episodeNumber = form.episodeNumber
+    }
+
+    if (!lookupTitle) {
+      setLookupMessage('Enter a title first.')
+      return
+    }
+
+    setLookupLoading(true)
+    try {
+      const result = await lookupMetadata(
+        {
+          title: lookupTitle,
+          type: form.type === 'series' ? 'series' : form.type === 'movie' ? 'movie' : undefined,
+          season,
+          episode: episodeNumber,
+        },
+        token,
+      )
+      if (result.message) {
+        setLookupMessage(result.message)
+        return
+      }
+      setForm((current) => ({
+        ...current,
+        // For episodes, OMDb returns the EPISODE's own title - a nice bonus, not just the series'.
+        title: form.type === 'episode' && result.title ? result.title : current.title,
+        year: result.year ?? current.year,
+        description: result.description || current.description,
+        posterUrl: result.posterUrl || current.posterUrl,
+        imdbId: result.imdbId || current.imdbId,
+      }))
+      setLookupMessage('Filled in from OMDb - review before saving.')
+    } catch (lookupError: unknown) {
+      setLookupMessage(lookupError instanceof Error ? lookupError.message : 'Lookup failed.')
+    } finally {
+      setLookupLoading(false)
     }
   }
 
@@ -273,7 +332,33 @@ export function AdminPage({
                 className="mt-2 w-full border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs text-[#c7f5bc] outline-none focus:border-[#8dff66]"
               />
             </label>
-            {field('TITLE', 'title')}
+            <label className="block text-[10px] text-[#68826b] sm:col-span-2">
+              TITLE
+              <div className="mt-2 flex gap-2">
+                <input
+                  type="text"
+                  value={form.title}
+                  onChange={(event) => update('title', event.target.value)}
+                  className="w-full border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs text-[#c7f5bc] outline-none focus:border-[#8dff66]"
+                />
+                <button
+                  type="button"
+                  onClick={handleAutofill}
+                  disabled={lookupLoading}
+                  className="shrink-0 whitespace-nowrap border border-[#29442c] px-3 py-3 text-[10px] font-bold text-[#8dff66] hover:border-[#8dff66] disabled:opacity-40"
+                >
+                  {lookupLoading ? 'LOOKING UP…' : 'AUTOFILL FROM TITLE'}
+                </button>
+              </div>
+              {form.type === 'episode' && (
+                <span className="mt-2 block text-[10px] text-[#68826b]">
+                  Looks up the episode by the selected series' title + season/episode number.
+                </span>
+              )}
+              {lookupMessage && (
+                <span className="mt-2 block text-[10px] text-[#8dff66]">{lookupMessage}</span>
+              )}
+            </label>
             <label className="block text-[10px] text-[#68826b]">
               TYPE
               <select
@@ -346,7 +431,6 @@ export function AdminPage({
               />
             </label>
             {field('POSTER URL', 'posterUrl', 'url')}
-            {field('PREVIEW IMAGE URL', 'previewUrl', 'url')}
             {field('SUBTITLE URL', 'subtitleUrl', 'url')}
             <label className="block text-[10px] text-[#68826b] sm:col-span-2">
               SUBTITLE TRACKS JSON (OPTIONAL)

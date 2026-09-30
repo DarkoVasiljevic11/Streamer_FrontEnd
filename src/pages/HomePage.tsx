@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react'
 import { ChevronDown, Play } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ContinueCard, MediaCard } from '../components/MediaCard'
@@ -27,7 +28,20 @@ export function HomePage({
   onCreateList,
   onPlay,
 }: HomePageProps) {
-  const filtered = media.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()))
+  const [selectedGenre, setSelectedGenre] = useState('')
+
+  // Derived from the full library, not the already-filtered list,
+  // so picking a genre never shrinks the menu's own options.
+  const genres = useMemo(
+    () => Array.from(new Set(media.flatMap((item) => item.genres))).sort(),
+    [media],
+  )
+
+  const filtered = media.filter(
+    (item) =>
+      item.title.toLowerCase().includes(query.toLowerCase()) &&
+      (!selectedGenre || item.genres.includes(selectedGenre)),
+  )
   const hero = media.find((item) => item.title === 'Dune: Part Two') ?? media[0]
   return (
     <div>
@@ -76,7 +90,7 @@ export function HomePage({
               Continue watching
             </h2>
           </div>
-          <Link to="/movies" className="text-xs text-[#769078] hover:text-[#8dff66]">
+          <Link to="/continue" className="text-xs text-[#769078] hover:text-[#8dff66]">
             VIEW ALL →
           </Link>
         </div>
@@ -98,10 +112,22 @@ export function HomePage({
               Browse collection
             </h2>
           </div>
-          <button className="flex items-center gap-2 border border-[#1f3823] px-3 py-2 text-[10px] text-[#769078] hover:border-[#8dff66] hover:text-[#baffaa]">
-            ALL GENRES
-            <ChevronDown size={13} />
-          </button>
+          <label className="relative flex items-center gap-2 border border-[#1f3823] px-3 py-2 text-[10px] text-[#769078] hover:border-[#8dff66] hover:text-[#baffaa]">
+            <select
+              value={selectedGenre}
+              onChange={(event) => setSelectedGenre(event.target.value)}
+              aria-label="Filter by genre"
+              className="appearance-none bg-transparent pr-4 text-[10px] uppercase tracking-wide text-inherit outline-none [&>option]:bg-[#09130c] [&>option]:text-[#c7f5bc]"
+            >
+              <option value="">All genres</option>
+              {genres.map((genre) => (
+                <option key={genre} value={genre}>
+                  {genre}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={13} className="pointer-events-none absolute right-3" />
+          </label>
         </div>
         {filtered.length ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -121,7 +147,9 @@ export function HomePage({
         ) : (
           <EmptyState
             message={
-              query ? 'No titles match your search.' : 'No media is available from the backend yet.'
+              query || selectedGenre
+                ? 'No titles match your filters.'
+                : 'No media is available from the backend yet.'
             }
           />
         )}

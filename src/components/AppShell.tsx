@@ -106,7 +106,7 @@ export function AppShell({
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && query.trim()) {
                   event.preventDefault()
-                  navigate('/movies')
+                  navigate('/')
                 }
               }}
               placeholder="search archive..."
@@ -120,7 +120,7 @@ export function AppShell({
                     type="button"
                     onClick={() => {
                       onSearchSelect(suggestion)
-                      navigate('/movies')
+                      navigate('/')
                     }}
                     className="block w-full cursor-pointer rounded-md px-3 py-2 text-left text-xs text-[#b5d7b0] hover:bg-[#18351f] hover:text-[#baffaa]"
                   >

@@ -30,6 +30,48 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
   const [playerError, setPlayerError] = useState<string | null>(null)
 
   /*
+   * Language to SEARCH for (Wyzie uses ISO 639-1 codes). Changing
+   * this re-runs the online search and replaces its results with
+   * the new language's - the separately fetched, manually
+   * configured tracks (if any) stay regardless of this setting.
+   *
+   * Kept to a small curated set rather than every ISO code that
+   * exists: a giant list is more to ship and more to scan for the
+   * one you want. Note Serbian only has a single ISO 639-1 code
+   * ("sr") - the underlying subtitle databases don't reliably
+   * distinguish Cyrillic vs Latin script as separate searchable
+   * languages, so this can't offer that as two distinct options in
+   * a way that's actually meaningful to the search API.
+   */
+  const [subtitleSearchLanguage, setSubtitleSearchLanguage] = useState('en')
+
+  const subtitleLanguageOptions = [
+    { code: 'en', label: 'English' },
+    { code: 'sr', label: 'Serbian' },
+    { code: 'es', label: 'Spanish' },
+    { code: 'fr', label: 'French' },
+    { code: 'de', label: 'German' },
+    { code: 'pt', label: 'Portuguese' },
+    { code: 'it', label: 'Italian' },
+    { code: 'ru', label: 'Russian' },
+    { code: 'ar', label: 'Arabic' },
+  ]
+
+  /*
+   * Subtitle text size. Cycled via a single button rather than a
+   * dropdown/slider - three presets is plenty and a click-to-cycle
+   * button is the least code/UI for the job.
+   */
+  const subtitleSizes = ['Small', 'Medium', 'Large'] as const
+  type SubtitleSize = (typeof subtitleSizes)[number]
+  const [subtitleSize, setSubtitleSize] = useState<SubtitleSize>('Medium')
+  const subtitleScale: Record<SubtitleSize, number> = {
+    Small: 0.8,
+    Medium: 1,
+    Large: 1.4,
+  }
+
+  /*
    * True while waiting on the server for the manifest/first
    * segment - i.e. FFmpeg cold-starting a transcode. Shown as a
    * spinner so the player doesn't just look frozen on first play.
@@ -51,6 +93,19 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
 
   const lastReportedProgress = useRef(-1)
   const hlsRef = useRef<Hls | null>(null)
+
+  /*
+   * Continue watching: only apply the saved resume position once
+   * per time this specific title is opened - onLoadedMetadata also
+   * fires on every quality switch (which reloads the video element
+   * from scratch), and we don't want switching quality mid-watch to
+   * jump the viewer back to wherever they'd originally left off.
+   */
+  const hasResumedRef = useRef(false)
+
+  useEffect(() => {
+    hasResumedRef.current = false
+  }, [media.id])
 
   const sourceUrl = useMemo(() => {
     const selectedVariant = media.variants?.find(
@@ -79,7 +134,7 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
 
       const [staticResult, searchResult] = await Promise.allSettled([
         fetchSubtitleTracks(media.id),
-        searchSubtitles(media.id),
+        searchSubtitles(media.id, subtitleSearchLanguage),
       ])
 
       if (cancelled) return
@@ -122,7 +177,7 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
     return () => {
       cancelled = true
     }
-  }, [media.id])
+  }, [media.id, subtitleSearchLanguage])
 
   /*
    * HLS / video setup
@@ -684,7 +739,15 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
             muted={isMuted}
             playsInline
             preload="auto"
-            poster={media.posterUrl}
+            /*
+             * Deliberately NO poster attribute and NO poster
+             * background-image here. The poster is only for browse
+             * surfaces (cards, continue-watching) - inside the
+             * player it showed up behind the video as a forced
+             * backdrop (visible in the letterbox bars, both windowed
+             * and fullscreen) instead of letting the video itself
+             * fill the frame over plain black.
+             */
             /*
              * Required for cross-origin <track> (subtitle) files to
              * actually load and render. Without this, the browser
@@ -698,11 +761,9 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
              * without CORS, this only tightens fetches to CORS mode.
              */
             crossOrigin="anonymous"
-            className="h-full w-full bg-black object-contain"
+            className="streamer-video h-full w-full bg-black object-contain"
             style={{
-              backgroundImage: media.posterUrl
-                ? `url(${media.posterUrl})`
-                : undefined,
+              ['--subtitle-scale' as string]: subtitleScale[subtitleSize],
             }}
             onLoadedMetadata={(event) => {
               const video = event.currentTarget
@@ -710,10 +771,37 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
               video.volume = volume / 100
               video.muted = isMuted
 
-              setDuration(video.duration || 0)
+              const total = video.duration || 0
+
+              setDuration(total)
               setPlayerError(null)
               setIsBuffering(false)
               setIsPlaying(true)
+
+              /*
+               * Continue watching: resume from the saved position.
+               *
+               * media.progress is a 0-100 percentage (see
+               * reportProgress below and the backend's
+               * ContinueWatching.Progress field). Skip the very
+               * start (nothing meaningful to resume) and the very
+               * end (>=95% - close enough to "finished" that
+               * starting over makes more sense than resuming at
+               * the last couple of seconds).
+               */
+              if (
+                !hasResumedRef.current &&
+                media.progress &&
+                media.progress > 1 &&
+                media.progress < 95 &&
+                Number.isFinite(total) &&
+                total > 0
+              ) {
+                video.currentTime = (media.progress / 100) * total
+                setCurrentTime(video.currentTime)
+              }
+
+              hasResumedRef.current = true
             }}
             onDurationChange={(event) => {
               setDuration(
@@ -818,6 +906,28 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
                   )?.language ?? 'en'
                 }
                 label={subtitles}
+                onLoad={(event) => {
+                  /*
+                   * Move cues up from the browser's default
+                   * bottom-edge position - Netflix-style, clear of
+                   * this player's own control bar - by setting each
+                   * cue's `line` directly via the TextTrack API.
+                   * This is NOT a CSS-stylable property (unlike
+                   * font size above); it's a WebVTT cue setting.
+                   *
+                   * snapToLines must be turned off first: with it
+                   * on (the default), `line` means "row number",
+                   * not "percent from the top".
+                   */
+                  const cues = event.currentTarget.track.cues
+                  if (!cues) return
+                  for (const cue of Array.from(cues)) {
+                    if (cue instanceof VTTCue) {
+                      cue.snapToLines = false
+                      cue.line = 82
+                    }
+                  }
+                }}
               />
             )}
           </video>
@@ -970,6 +1080,21 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
                   </select>
                 )}
 
+              {/* Subtitle search language */}
+              <select
+                value={subtitleSearchLanguage}
+                onChange={(event) => setSubtitleSearchLanguage(event.target.value)}
+                aria-label="Subtitle search language"
+                title="Search subtitles in this language"
+                className="rounded bg-black/70 px-2 py-1 text-sm text-white outline-none"
+              >
+                {subtitleLanguageOptions.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+
               {/* Subtitles */}
               {(subtitleTracks.length > 0 ||
                 media.subtitleUrl) && (
@@ -999,6 +1124,23 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
                     ),
                   )}
                 </select>
+              )}
+
+              {/* Subtitle size - only meaningful once subtitles are actually on */}
+              {subtitles !== 'Off' && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSubtitleSize((current) => {
+                      const index = subtitleSizes.indexOf(current)
+                      return subtitleSizes[(index + 1) % subtitleSizes.length]
+                    })
+                  }
+                  title={`Subtitle size: ${subtitleSize} (click to cycle)`}
+                  className="rounded bg-black/70 px-2 py-1 text-sm font-semibold text-white outline-none transition hover:bg-black/90"
+                >
+                  Aa <span className="text-xs text-white/60">{subtitleSize[0]}</span>
+                </button>
               )}
 
               {/* Fullscreen */}

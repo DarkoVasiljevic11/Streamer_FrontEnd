@@ -23,3 +23,24 @@ textarea {
   font: inherit;
   cursor: text;
 }
+
+/*
+ * Subtitle (WebVTT cue) styling for the media player.
+ *
+ * ::cue can't be targeted by a Tailwind class or inline style
+ * directly (it's a pseudo-element, not a real DOM node), so size is
+ * driven through a CSS custom property set on the <video> element
+ * itself (see MediaPlayerModal's subtitleScale) - that property
+ * inherits through into ::cue, which a plain style attribute can't.
+ *
+ * Vertical position (moving cues up from the very bottom, clear of
+ * this player's own control bar) is NOT something ::cue can do -
+ * that's a WebVTT cue setting, applied via the VTTCue.line property
+ * in MediaPlayerModal once each track's cues load, not CSS.
+ */
+video.streamer-video::cue {
+  font-size: calc(1em * var(--subtitle-scale, 1));
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 0.15em 0.4em;
+  line-height: 1.4;
+}

@@ -1,19 +1,57 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { CreateListModal, RenameListModal } from './components/ListModals'
-import MediaPlayerModal from './components/MediaPlayerModal'
 import { SeriesEpisodesModal } from './components/SeriesEpisodesModal'
 import { DEMO_MEDIA } from './utils/demoData'
-import { fetchCurrentUser, fetchMedia, saveUserState, updateUserAccount } from './utils/api'
-import { AdminPage } from './pages/AdminPage'
+import { fetchCurrentUser, fetchMedia, fetchMediaById, saveUserState, updateUserAccount } from './utils/api'
 import { HomePage } from './pages/HomePage'
-import { ListsPage } from './pages/ListsPage'
 import { LoginPage } from './pages/LoginPage'
 import { MoviesPage } from './pages/MoviesPage'
-import { ProfilePage } from './pages/ProfilePage'
 import { SeriesPage } from './pages/SeriesPage'
 import type { MediaItem, UserProfile } from './types'
+
+/*
+Code-split anything that isn't needed for the first paint of the
+most common journey (browsing movies/series and logging in).
+
+MediaPlayerModal alone pulls in hls.js - a substantial dependency
+that only ever matters once someone actually presses play - so
+bundling it into the main chunk would make every single visitor
+download player code whether or not they ever watch anything.
+AdminPage/ProfilePage/ListsPage are large-ish and only reached by
+a fraction of visits, so they're worth splitting too even without
+a heavy dependency of their own.
+
+HomePage/MoviesPage/SeriesPage/LoginPage stay as regular imports:
+they're small and are exactly what most visits need immediately,
+so lazy-loading them would trade a real bundle-size win for a
+network round-trip most people would hit anyway.
+*/
+const MediaPlayerModal = lazy(() => import('./components/MediaPlayerModal'))
+const AdminPage = lazy(() =>
+  import('./pages/AdminPage').then((module) => ({ default: module.AdminPage })),
+)
+const ProfilePage = lazy(() =>
+  import('./pages/ProfilePage').then((module) => ({ default: module.ProfilePage })),
+)
+const ListsPage = lazy(() =>
+  import('./pages/ListsPage').then((module) => ({ default: module.ListsPage })),
+)
+const ContinueWatchingPage = lazy(() =>
+  import('./pages/ContinueWatchingPage').then((module) => ({
+    default: module.ContinueWatchingPage,
+  })),
+)
+
+function RouteFallback() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#1f3823] border-t-[#8dff66]" />
+    </div>
+  )
+}
+
 
 const defaultLists = {
   'Watch later': ['Past Lives'],
@@ -157,15 +195,69 @@ function App() {
     return () => document.removeEventListener('pointerdown', closePicker)
   }, [])
 
+  /*
+   * Continue watching.
+   *
+   * IMPORTANT: this used to cross-reference user.continueWatching
+   * against `media`, which deliberately excludes episodes (see
+   * handleMediaList on the backend - episodes only ever load
+   * per-series, not in the unscoped library list). That meant any
+   * continue-watching entry for an EPISODE could never resolve to
+   * a playable item - it would just silently vanish from the row,
+   * or fail to actually resume. Fetching each entry's full item by
+   * ID directly (movie, series, or episode - fetchMediaById works
+   * for all three) fixes that.
+   *
+   * Cached per-ID and only re-fetched when the SET of ids changes
+   * (via idsKey below), not on every progress update - playback
+   * reports progress every few seconds while watching, and
+   * user.continueWatching gets a new array identity each time,
+   * which would otherwise refire this constantly.
+   */
+  const [continueWatchingCache, setContinueWatchingCache] = useState<Record<string, MediaItem>>({})
+  const fetchedContinueWatchingIds = useRef<Set<string>>(new Set())
+
+  const continueWatchingIdsKey = (user?.continueWatching ?? [])
+    .map((entry) => entry.mediaId)
+    .join(',')
+
+  useEffect(() => {
+    const ids = continueWatchingIdsKey ? continueWatchingIdsKey.split(',') : []
+    const missing = ids.filter((id) => !fetchedContinueWatchingIds.current.has(id))
+    if (missing.length === 0) return
+
+    missing.forEach((id) => fetchedContinueWatchingIds.current.add(id))
+
+    let cancelled = false
+    void Promise.allSettled(missing.map((id) => fetchMediaById(id))).then((results) => {
+      if (cancelled) return
+      setContinueWatchingCache((current) => {
+        const next = { ...current }
+        results.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            next[missing[index]] = result.value
+          } else {
+            // Don't retry a genuinely missing/deleted item forever.
+            fetchedContinueWatchingIds.current.add(missing[index])
+          }
+        })
+        return next
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [continueWatchingIdsKey])
+
   const continueWatching = useMemo(() => {
     if (user?.continueWatching?.length) {
-      return media.flatMap((item) => {
-        const watch = user.continueWatching.find((entry) => entry.mediaId === item.id)
-        return watch ? [{ ...item, progress: watch.progress }] : []
+      return user.continueWatching.flatMap((watch) => {
+        const item = continueWatchingCache[watch.mediaId]
+        return item ? [{ ...item, progress: watch.progress }] : []
       })
     }
     return media.filter((item) => item.progress !== undefined)
-  }, [media, user])
+  }, [user, continueWatchingCache, media])
   const films = useMemo(() => media.filter((item) => item.type === 'movie'), [media])
   const series = useMemo(() => media.filter((item) => item.type === 'series'), [media])
   const mediaByTitle = useMemo(() => new Map(media.map((item) => [item.title, item])), [media])
@@ -270,112 +362,124 @@ function App() {
       searchSuggestions={searchSuggestions}
       onSearchSelect={setQuery}
     >
-      <Routes>
-        <Route
-          path="/"
-          element={
-            <HomePage
-              media={films}
-              continueWatching={continueWatching}
-              query={query}
-              lists={lists}
-              listPicker={listPicker}
-              onListPickerChange={setListPicker}
-              onToggleList={toggleListItem}
-              onCreateList={openCreateList}
-              onPlay={handleMediaSelect}
-            />
-          }
-        />
-        <Route
-          path="/movies"
-          element={
-            <MoviesPage
-              media={films}
-              query={query}
-              lists={lists}
-              listPicker={listPicker}
-              onListPickerChange={setListPicker}
-              onToggleList={toggleListItem}
-              onCreateList={openCreateList}
-              onPlay={handleMediaSelect}
-            />
-          }
-        />
-        <Route
-          path="/series"
-          element={
-            <SeriesPage
-              media={series}
-              query={query}
-              lists={lists}
-              listPicker={listPicker}
-              onListPickerChange={setListPicker}
-              onToggleList={toggleListItem}
-              onCreateList={openCreateList}
-              onPlay={handleMediaSelect}
-            />
-          }
-        />
-        <Route
-          path="/list/*"
-          element={
-            <ListsPage
-              lists={lists}
-              mediaByTitle={mediaByTitle}
-              query={query}
-              onPlay={handleMediaSelect}
-              onToggleList={toggleListItem}
-              onCreateList={openCreateList}
-              onRename={(name) => {
-                setEditingList(name)
-                setEditedListName(name)
-              }}
-              onRemove={removeList}
-            />
-          }
-        />
-        <Route
-          path="/profile"
-          element={
-            <ProfilePage
-              profileName={profileName}
-              username={user.username}
-              profileInitials={profileInitials}
-              listsCount={Object.keys(lists).length}
-              savedCount={Object.values(lists).flat().length}
-              onNameChange={(value) => {
-                const nextName = value
-                setProfileName(nextName)
-                setProfileInitials(nextName.trim().slice(0, 2).toUpperCase() || '??')
-                void persistUserState(lists, nextName)
-              }}
-              onInitialsChange={(value) => setProfileInitials(value)}
-              onSaveAccount={handleAccountSave}
-              onLogout={handleLogout}
-            />
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            user.role === 'admin' ? (
-              <AdminPage token={token} onLoginSuccess={handleLoginSuccess} />
-            ) : (
-              <section className="py-12">
-                <div className="max-w-xl border border-[#1f3823] bg-[#09130c] p-6">
-                  <span className="text-[10px] tracking-[0.2em] text-[#8dff66]">SECURE ADMIN</span>
-                  <h2 className="mt-3 text-3xl font-bold text-[#c7f5bc]">Access denied</h2>
-                  <p className="mt-3 text-sm text-[#769078]">
-                    This area is restricted to the admin account configured in the backend.
-                  </p>
-                </div>
-              </section>
-            )
-          }
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route
+            path="/"
+            element={
+              <HomePage
+                media={media}
+                continueWatching={continueWatching}
+                query={query}
+                lists={lists}
+                listPicker={listPicker}
+                onListPickerChange={setListPicker}
+                onToggleList={toggleListItem}
+                onCreateList={openCreateList}
+                onPlay={handleMediaSelect}
+              />
+            }
+          />
+          <Route
+            path="/movies"
+            element={
+              <MoviesPage
+                media={films}
+                query={query}
+                lists={lists}
+                listPicker={listPicker}
+                onListPickerChange={setListPicker}
+                onToggleList={toggleListItem}
+                onCreateList={openCreateList}
+                onPlay={handleMediaSelect}
+              />
+            }
+          />
+          <Route
+            path="/series"
+            element={
+              <SeriesPage
+                media={series}
+                query={query}
+                lists={lists}
+                listPicker={listPicker}
+                onListPickerChange={setListPicker}
+                onToggleList={toggleListItem}
+                onCreateList={openCreateList}
+                onPlay={handleMediaSelect}
+              />
+            }
+          />
+          <Route
+            path="/continue"
+            element={
+              <ContinueWatchingPage
+                items={continueWatching}
+                query={query}
+                onPlay={handleMediaSelect}
+              />
+            }
+          />
+          <Route
+            path="/list/*"
+            element={
+              <ListsPage
+                lists={lists}
+                mediaByTitle={mediaByTitle}
+                query={query}
+                onPlay={handleMediaSelect}
+                onToggleList={toggleListItem}
+                onCreateList={openCreateList}
+                onRename={(name) => {
+                  setEditingList(name)
+                  setEditedListName(name)
+                }}
+                onRemove={removeList}
+              />
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <ProfilePage
+                profileName={profileName}
+                username={user.username}
+                profileInitials={profileInitials}
+                listsCount={Object.keys(lists).length}
+                savedCount={Object.values(lists).flat().length}
+                onNameChange={(value) => {
+                  const nextName = value
+                  setProfileName(nextName)
+                  setProfileInitials(nextName.trim().slice(0, 2).toUpperCase() || '??')
+                  void persistUserState(lists, nextName)
+                }}
+                onInitialsChange={(value) => setProfileInitials(value)}
+                onSaveAccount={handleAccountSave}
+                onLogout={handleLogout}
+              />
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              user.role === 'admin' ? (
+                <AdminPage token={token} onLoginSuccess={handleLoginSuccess} />
+              ) : (
+                <section className="py-12">
+                  <div className="max-w-xl border border-[#1f3823] bg-[#09130c] p-6">
+                    <span className="text-[10px] tracking-[0.2em] text-[#8dff66]">SECURE ADMIN</span>
+                    <h2 className="mt-3 text-3xl font-bold text-[#c7f5bc]">Access denied</h2>
+                    <p className="mt-3 text-sm text-[#769078]">
+                      This area is restricted to the admin account configured in the backend.
+                    </p>
+                  </div>
+                </section>
+              )
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspense>
 
       {selectedSeries && (
         <SeriesEpisodesModal
@@ -388,11 +492,13 @@ function App() {
         />
       )}
       {selected && (
-        <MediaPlayerModal
-          media={selected}
-          onClose={() => setSelected(null)}
-          onProgress={(progress) => handlePlaybackProgress(selected, progress)}
-        />
+        <Suspense fallback={null}>
+          <MediaPlayerModal
+            media={selected}
+            onClose={() => setSelected(null)}
+            onProgress={(progress) => handlePlaybackProgress(selected, progress)}
+          />
+        </Suspense>
       )}
       {createListModal && (
         <CreateListModal
