@@ -76,7 +76,9 @@ function App() {
   const [user, setUser] = useState<UserProfile | null>(null)
   const [media, setMedia] = useState<MediaItem[]>(DEMO_MEDIA)
   const [loading, setLoading] = useState(true)
-  const [authLoading, setAuthLoading] = useState(true)
+  // Only a stored token needs a network check. Without one, there is nothing
+  // to load, so the flag starts false and no effect has to clear it.
+  const [authLoading, setAuthLoading] = useState(() => Boolean(localStorage.getItem('streamer.jwt')))
   const [apiError, setApiError] = useState<string | null>(null)
   const [isDemo, setIsDemo] = useState(false)
   const [lists, setLists] = useState<Record<string, string[]>>(defaultLists)
@@ -137,11 +139,9 @@ function App() {
   }
 
   useEffect(() => {
-    if (!token) {
-      setUser(null)
-      setAuthLoading(false)
-      return
-    }
+    // Logged out (or never logged in): nothing to fetch. The user is already
+    // null in this case - logout and the failed-token path both clear it.
+    if (!token) return
     let active = true
     fetchCurrentUser(token)
       .then((profile) => {
@@ -483,6 +483,7 @@ function App() {
 
       {selectedSeries && (
         <SeriesEpisodesModal
+          key={selectedSeries.id}
           series={selectedSeries}
           onClose={() => setSelectedSeries(null)}
           onPlayEpisode={(episode) => {

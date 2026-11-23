@@ -1,6 +1,16 @@
 import { Play, Plus } from 'lucide-react'
 import { ListPicker } from './ListPicker'
-import type { MediaCardProps } from '../types'
+import type { ListsMap, MediaItem } from '../types'
+
+type MediaCardProps = {
+  media: MediaItem
+  lists: ListsMap
+  listPicker: string | null
+  onListPickerChange: (title: string | null) => void
+  onToggleList: (listName: string, title: string) => void
+  onCreateList: () => void
+  onPlay: (media: MediaItem) => void
+}
 
 export function MediaCard({
   media,

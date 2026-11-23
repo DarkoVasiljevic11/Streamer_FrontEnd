@@ -1,4 +1,11 @@
-import type { MediaItem, MediaType, UserProfile } from '../types'
+import type {
+  CreateMediaInput,
+  MediaItem,
+  MediaType,
+  MetadataLookupResult,
+  SubtitleSearchResult,
+  UserProfile,
+} from '../types'
 
 const API_URL = import.meta.env.VITE_API_URL?.replace(/\/$/, '')
 const REQUEST_TIMEOUT_MS = 10_000
@@ -129,12 +136,6 @@ export async function fetchEpisodes(
   return result.items.map(normalizeMedia)
 }
 
-export type SubtitleSearchResult = {
-  label: string
-  language: string
-  url: string
-}
-
 export async function searchSubtitles(
   mediaId: string,
   language = 'en',
@@ -197,23 +198,6 @@ export async function fetchSubtitleTracks(
 
 export async function checkHealth(signal?: AbortSignal): Promise<{ ok: boolean }> {
  return requestJson<{ ok: boolean }>('/api/health', { signal })
-}
-
-export type CreateMediaInput = {
- title: string
- type: MediaType
- year?: number
- genres: string[]
- description: string
- posterUrl: string
- subtitleUrl: string
- subtitleTracks?: Array<{ label: string; language: string; url: string }>
- file?: File
- libraryPath?: string
- imdbId?: string
- seriesId?: string
- season?: number
- episodeNumber?: number
 }
 
 export async function createMedia(
@@ -328,15 +312,6 @@ export async function deleteMedia(id: string, token: string, signal?: AbortSigna
     window.clearTimeout(timeout)
     signal?.removeEventListener('abort', abortExternal)
   }
-}
-
-export type MetadataLookupResult = {
-  title?: string
-  year?: number
-  description?: string
-  posterUrl?: string
-  imdbId?: string
-  message?: string
 }
 
 export async function lookupMetadata(

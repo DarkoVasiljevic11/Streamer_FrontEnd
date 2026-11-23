@@ -13,11 +13,11 @@ export function SeriesEpisodesModal({ series, onClose, onPlayEpisode }: Props) {
   const [episodes, setEpisodes] = useState<MediaItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  // The parent renders this modal with key={series.id}, so a different series
+  // mounts a fresh instance with empty state. This effect therefore only
+  // starts the fetch and never has to reset state itself.
   useEffect(() => {
     const controller = new AbortController()
-
-    setEpisodes(null)
-    setError(null)
 
     fetchEpisodes(series.id, controller.signal)
       .then(setEpisodes)

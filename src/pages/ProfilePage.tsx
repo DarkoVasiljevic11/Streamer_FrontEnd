@@ -1,5 +1,16 @@
-import { useEffect, useState } from 'react'
-import type { ProfileProps } from '../types'
+import { useState } from 'react'
+
+type ProfileProps = {
+  profileName: string
+  username: string
+  profileInitials: string
+  listsCount: number
+  savedCount: number
+  onNameChange: (value: string) => void
+  onInitialsChange: (value: string) => void
+  onSaveAccount: (payload: { username?: string; password?: string; displayName?: string }) => Promise<void> | void
+  onLogout: () => void
+}
 
 export function ProfilePage({
   profileName,
@@ -19,10 +30,15 @@ export function ProfilePage({
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  // Re-sync the editable fields when the saved profile changes. Done during
+  // render (React's documented pattern) rather than in an effect, so there is
+  // no extra commit and no cascading update.
+  const [syncedFrom, setSyncedFrom] = useState({ profileName, username })
+  if (syncedFrom.profileName !== profileName || syncedFrom.username !== username) {
+    setSyncedFrom({ profileName, username })
     setDisplayName(profileName)
     setAccountUsername(username)
-  }, [profileName, username])
+  }
 
   const save = async () => {
     setError(null)
@@ -82,13 +98,13 @@ export function ProfilePage({
               className="mt-2 w-full border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs text-[#c7f5bc] outline-none focus:border-[#8dff66]"
             />
           </label>
-          <label className="mt-4 block text-[10px] text-[#68826b]">
+          <label className="mt-4  block text-[10px] text-[#68826b]">
             INITIALS
             <input
               value={profileInitials}
               maxLength={2}
               onChange={(event) => onInitialsChange(event.target.value.toUpperCase().slice(0, 2))}
-              className="mt-2 w-24 border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs uppercase text-[#c7f5bc] outline-none focus:border-[#8dff66]"
+              className="mt-2 ml-2 w-24 border border-[#29442c] bg-[#07100b] px-3 py-3 text-xs uppercase text-[#c7f5bc] outline-none focus:border-[#8dff66]"
             />
           </label>
 

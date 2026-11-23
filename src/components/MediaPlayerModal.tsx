@@ -10,6 +10,13 @@ type Props = {
   onProgress?: (progress: number) => void
 }
 
+
+// Browsers with native HLS (Safari, iOS) play .m3u8 without hls.js.
+function canPlayNativeHls(): boolean {
+  if (typeof document === 'undefined') return false
+  return document.createElement('video').canPlayType('application/vnd.apple.mpegurl') !== ''
+}
+
 export default function MediaPlayerModal({ media, onClose, onProgress }: Props) {
   const [quality, setQuality] = useState(
     media.variants?.[0]?.quality ?? '1080p',
@@ -66,9 +73,9 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
   type SubtitleSize = (typeof subtitleSizes)[number]
   const [subtitleSize, setSubtitleSize] = useState<SubtitleSize>('Medium')
   const subtitleScale: Record<SubtitleSize, number> = {
-    Small: 0.8,
-    Medium: 1,
-    Large: 1.4,
+    Small: 1,
+    Medium: 2,
+    Large: 3,
   }
 
   /*
@@ -76,7 +83,9 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
    * segment - i.e. FFmpeg cold-starting a transcode. Shown as a
    * spinner so the player doesn't just look frozen on first play.
    */
-  const [isBuffering, setIsBuffering] = useState(false)
+  // Starts true: the first load is always a buffering load. It is reset on
+  // every source change below, and cleared by the player's own events.
+  const [isBuffering, setIsBuffering] = useState(true)
 
   /*
    * Fullscreen + auto-hiding controls.
@@ -119,6 +128,26 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
       ''
     )
   }, [media, quality])
+
+  // Everything tied to one source resets together, during render, when the
+  // source changes. This replaces resetting it from inside the load effect.
+  const [loadedSource, setLoadedSource] = useState(sourceUrl)
+  if (loadedSource !== sourceUrl) {
+    setLoadedSource(sourceUrl)
+    setPlayerError(null)
+    setCurrentTime(0)
+    setDuration(0)
+    setIsBuffering(true)
+  }
+
+  // Errors that follow from the props alone are derived, not stored.
+  const sourceError = !sourceUrl
+    ? 'No video source was provided.'
+    : sourceUrl.endsWith('.m3u8') && !canPlayNativeHls() && !Hls.isSupported()
+      ? 'This browser does not support HLS playback.'
+      : null
+  const shownError = playerError ?? sourceError
+
 
   /*
    * Load subtitle tracks: whatever's statically configured on the
@@ -193,21 +222,9 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
     hlsRef.current?.destroy()
     hlsRef.current = null
 
-    setPlayerError(null)
-    setCurrentTime(0)
-    setDuration(0)
-
-    /*
-     * Any (re)load starts in a buffering state: for HLS this
-     * covers FFmpeg's cold-start transcode; the flag is cleared
-     * once the manifest is parsed (HLS) or metadata loads
-     * (native video), or on error.
-     */
-    setIsBuffering(true)
-
+    // Per-load state is reset during render (see loadedSource above). A
+    // missing source or an unsupported browser is reported by sourceError.
     if (!sourceUrl) {
-      setPlayerError('No video source was provided.')
-      setIsBuffering(false)
       return
     }
 
@@ -380,9 +397,6 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
         }
       }
 
-      setPlayerError(
-        'This browser does not support HLS playback.',
-      )
 
       return
     }
@@ -632,9 +646,22 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
    * state changes - e.g. pausing while fullscreen should bring the
    * controls back and keep them up until playback resumes.
    */
+  // A change of play/fullscreen state shows the controls again (during render,
+  // so no extra commit), and while fullscreen+playing a new hide timer starts.
+  const playbackMode = `${isPlaying}-${isFullscreen}`
+  const [seenMode, setSeenMode] = useState(playbackMode)
+  if (seenMode !== playbackMode) {
+    setSeenMode(playbackMode)
+    setControlsVisible(true)
+  }
   useEffect(() => {
-    revealControls()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!(isFullscreen && isPlaying)) return
+    const timer = window.setTimeout(() => setControlsVisible(false), 3000)
+    hideControlsTimeout.current = timer
+    return () => {
+      window.clearTimeout(timer)
+      if (hideControlsTimeout.current === timer) hideControlsTimeout.current = null
+    }
   }, [isPlaying, isFullscreen])
 
   /*
@@ -933,7 +960,7 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
           </video>
 
           {/* Player error */}
-          {playerError && (
+          {shownError && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70 p-6">
               <div className="max-w-lg text-center">
                 <p className="text-lg font-medium text-red-400">
@@ -941,14 +968,14 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
                 </p>
 
                 <p className="mt-2 text-sm text-white/70">
-                  {playerError}
+                  {shownError}
                 </p>
               </div>
             </div>
           )}
 
           {/* Buffering / cold-start transcode indicator */}
-          {isBuffering && !playerError && (
+          {isBuffering && !shownError && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/40">
               <div className="flex flex-col items-center gap-3">
                 <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -960,7 +987,7 @@ export default function MediaPlayerModal({ media, onClose, onProgress }: Props) 
           )}
 
           {/* Center play button */}
-          {!isPlaying && !playerError && !isBuffering && (
+          {!isPlaying && !shownError && !isBuffering && (
             <button
               type="button"
               onClick={() =>

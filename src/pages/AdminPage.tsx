@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState, type FormEvent } from 'react'
-import { createMedia, deleteMedia, fetchEpisodes, fetchMedia, loginAdmin, lookupMetadata, type CreateMediaInput } from '../utils/api'
-import type { MediaItem, MediaType, UserProfile } from '../types'
+import { createMedia, deleteMedia, fetchEpisodes, fetchMedia, loginAdmin, lookupMetadata } from '../utils/api'
+import type { CreateMediaInput, MediaItem, MediaType, UserProfile } from '../types'
 
 const TOKEN_KEY = 'streamer.adminToken'
 
